@@ -1080,6 +1080,34 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             spec_token_ids = self.generate_draft_token_ids(
                 valid_sampled_token_ids, sampling_metadata)
 
+        if self.eagle_model is not None:
+            # Adjust the input ids.
+            eagle_input_ids = input_ids + valid_sampled_token_ids
+            eagle_positions = positions + ...
+            eagle_hidden_states = hidden_states
+
+            spec_token_ids = []
+            for _ in range(self.speculative_config.num_speculative_tokens):
+                with set_forward_context(attn_metadata, self.vllm_config):
+                    eagle_hidden_states = self.eagle_model(
+                        input_ids=eagle_input_ids,
+                        positions=eagle_positions,
+                        hidden_states=eagle_hidden_states,
+                    )
+                eagle_logits = self.model.compute_logits(
+                    eagle_hidden_states, None)
+
+                eagle_input_ids = self.model.sample(
+                    logits=eagle_logits,
+                    sampling_metadata=self.input_batch.sampling_metadata,
+                ).sampled_token_ids
+                spec_token_ids.append(eagle_input_ids)
+
+                eagle_positions = eagle_positions + 1
+                # Update the attention metadata.
+                attn_metadata = ...
+
+
         return ModelRunnerOutput(
             req_ids=self.input_batch.req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
